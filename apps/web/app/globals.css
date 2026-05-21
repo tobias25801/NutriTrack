@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 13% 7%;
+    --foreground: 0 0% 100%;
+    --card: 224 18% 11%;
+    --card-foreground: 0 0% 100%;
+    --popover: 224 18% 11%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 259 100% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 224 18% 16%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 224 18% 16%;
+    --muted-foreground: 218 11% 65%;
+    --accent: 259 100% 65%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 14% 15%;
+    --input: 220 14% 15%;
+    --ring: 259 100% 65%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-nt-bg text-nt-text antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0f1115;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4b5563;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-nt-card/80 backdrop-blur-md border border-nt-border/50 rounded-2xl;
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300 hover:bg-nt-card-hover/80 hover:border-nt-border-light/50 hover:shadow-lg hover:shadow-nt-accent/5;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-nt-accent to-purple-400 bg-clip-text text-transparent;
+  }
+
+  .accent-glow {
+    box-shadow: 0 0 30px rgba(124, 77, 255, 0.15);
+  }
+
+  .macro-protein {
+    @apply text-blue-400;
+  }
+
+  .macro-carbs {
+    @apply text-amber-400;
+  }
+
+  .macro-fats {
+    @apply text-red-400;
+  }
+
+  .macro-calories {
+    @apply text-purple-400;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-nt-text-secondary hover:text-white hover:bg-nt-card-hover transition-all duration-200 cursor-pointer;
+  }
+
+  .sidebar-item-active {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-white bg-nt-accent/20 border border-nt-accent/30;
+  }
+
+  .progress-bar {
+    @apply h-2 rounded-full overflow-hidden bg-nt-border;
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Custom animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(124, 77, 255, 0.2); }
+  50% { box-shadow: 0 0 40px rgba(124, 77, 255, 0.4); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow-pulse 2s ease-in-out infinite;
+}

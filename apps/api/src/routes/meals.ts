@@ -1,0 +1,204 @@
+import { FastifyInstance, FastifyPluginAsync } from 'fastify'
+import { z } from 'zod'
+import { authenticate, getUser } from '../middleware/auth'
+import { awardXP, checkAndUpdateStreak, checkFirstLogAchievement } from '../services/gamification'
+
+const mealsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
+  // Get meals for a date (defaults to today)
+  fastify.get('/', { preHandler: authenticate }, async (request, reply) => {
+    const { date } = request.query as { date?: string }
+    const { sub: userId } = getUser(request)
+
+    const targetDate = date ? new Date(date) : new Date()
+    const startOfDay = new Date(targetDate)
+    startOfDay.setHours(0, 0, 0, 0)
+    const endOfDay = new Date(targetDate)
+    endOfDay.setHours(23, 59, 59, 999)
+
+    const entries = await fastify.prisma.mealEntry.findMany({
+      where: {
+        userId,
+        date: { gte: startOfDay, lte: endOfDay },
+      },
+      include: { food: true },
+      orderBy: { date: 'asc' },
+    })
+
+    const grouped = {
+      BREAKFAST: entries.filter((e) => e.mealType === 'BREAKFAST'),
+      LUNCH: entries.filter((e) => e.mealType === 'LUNCH'),
+      DINNER: entries.filter((e) => e.mealType === 'DINNER'),
+      SNACK: entries.filter((e) => e.mealType === 'SNACK'),
+    }
+
+    const totals = entries.reduce(
+      (acc, e) => ({
+        calories: acc.calories + e.calories,
+        protein: acc.protein + e.protein,
+        carbs: acc.carbs + e.carbs,
+        fats: acc.fats + e.fats,
+      }),
+      { calories: 0, protein: 0, carbs: 0, fats: 0 }
+    )
+
+    return reply.send({ entries, grouped, totals, date: startOfDay.toISOString().split('T')[0] })
+  })
+
+  // Log a meal entry
+  fastify.post('/', { preHandler: authenticate }, async (request, reply) => {
+    const { sub: userId } = getUser(request)
+
+    const schema = z.object({
+      foodId: z.string(),
+      grams: z.number().min(1),
+      mealType: z.enum(['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK']),
+      date: z.string().optional(),
+    })
+
+    const result = schema.safeParse(request.body)
+    if (!result.success) {
+      return reply.status(400).send({ error: 'Validation error', details: result.error.issues })
+    }
+
+    const { foodId, grams, mealType, date } = result.data
+
+    const food = await fastify.prisma.food.findUnique({ where: { id: foodId } })
+    if (!food) {
+      return reply.status(404).send({ error: 'Food not found' })
+    }
+
+    const ratio = grams / 100
+    const calories = food.calories * ratio
+    const protein = food.protein * ratio
+    const carbs = food.carbs * ratio
+    const fats = food.fats * ratio
+
+    const entry = await fastify.prisma.mealEntry.create({
+      data: {
+        userId,
+        foodId,
+        grams,
+        mealType,
+        date: date ? new Date(date) : new Date(),
+        calories,
+        protein,
+        carbs,
+        fats,
+      },
+      include: { food: true },
+    })
+
+    // Gamification
+    await checkFirstLogAchievement(fastify.prisma, userId)
+    const newStreak = await checkAndUpdateStreak(fastify.prisma, userId)
+    const xpResult = await awardXP(fastify.prisma, userId, 10, 'meal_logged')
+
+    return reply.status(201).send({ entry, streak: newStreak, xp: xpResult })
+  })
+
+  // Update meal entry
+  fastify.put('/:id', { preHandler: authenticate }, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const { sub: userId } = getUser(request)
+
+    const entry = await fastify.prisma.mealEntry.findFirst({
+      where: { id, userId },
+      include: { food: true },
+    })
+
+    if (!entry) {
+      return reply.status(404).send({ error: 'Meal entry not found' })
+    }
+
+    const { grams, mealType } = request.body as { grams?: number; mealType?: string }
+
+    const food = entry.food
+    const newGrams = grams ?? entry.grams
+    const ratio = newGrams / 100
+
+    const updated = await fastify.prisma.mealEntry.update({
+      where: { id },
+      data: {
+        grams: newGrams,
+        mealType: (mealType as any) ?? entry.mealType,
+        calories: food.calories * ratio,
+        protein: food.protein * ratio,
+        carbs: food.carbs * ratio,
+        fats: food.fats * ratio,
+      },
+      include: { food: true },
+    })
+
+    return reply.send(updated)
+  })
+
+  // Delete meal entry
+  fastify.delete('/:id', { preHandler: authenticate }, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const { sub: userId } = getUser(request)
+
+    const entry = await fastify.prisma.mealEntry.findFirst({ where: { id, userId } })
+    if (!entry) {
+      return reply.status(404).send({ error: 'Meal entry not found' })
+    }
+
+    await fastify.prisma.mealEntry.delete({ where: { id } })
+    return reply.send({ success: true })
+  })
+
+  // Get nutrition summary for a date range
+  fastify.get('/nutrition/summary', { preHandler: authenticate }, async (request, reply) => {
+    const { startDate, endDate, groupBy = 'day' } = request.query as Record<string, string>
+    const { sub: userId } = getUser(request)
+
+    const start = startDate ? new Date(startDate) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const end = endDate ? new Date(endDate) : new Date()
+
+    start.setHours(0, 0, 0, 0)
+    end.setHours(23, 59, 59, 999)
+
+    const entries = await fastify.prisma.mealEntry.findMany({
+      where: { userId, date: { gte: start, lte: end } },
+      orderBy: { date: 'asc' },
+    })
+
+    // Group by day
+    const byDay = new Map<string, { calories: number; protein: number; carbs: number; fats: number; count: number }>()
+
+    for (const entry of entries) {
+      const day = entry.date.toISOString().split('T')[0]
+      const existing = byDay.get(day) || { calories: 0, protein: 0, carbs: 0, fats: 0, count: 0 }
+      byDay.set(day, {
+        calories: existing.calories + entry.calories,
+        protein: existing.protein + entry.protein,
+        carbs: existing.carbs + entry.carbs,
+        fats: existing.fats + entry.fats,
+        count: existing.count + 1,
+      })
+    }
+
+    const dailySummaries = Array.from(byDay.entries()).map(([date, data]) => ({ date, ...data }))
+
+    const totals = entries.reduce(
+      (acc, e) => ({
+        calories: acc.calories + e.calories,
+        protein: acc.protein + e.protein,
+        carbs: acc.carbs + e.carbs,
+        fats: acc.fats + e.fats,
+      }),
+      { calories: 0, protein: 0, carbs: 0, fats: 0 }
+    )
+
+    const days = dailySummaries.length || 1
+    const averages = {
+      calories: totals.calories / days,
+      protein: totals.protein / days,
+      carbs: totals.carbs / days,
+      fats: totals.fats / days,
+    }
+
+    return reply.send({ dailySummaries, totals, averages, days })
+  })
+}
+
+export default mealsRoutes

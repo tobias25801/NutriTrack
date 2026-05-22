@@ -6,14 +6,12 @@ import {
   Activity,
   Barcode,
   Brain,
-  ChevronRight,
   Flame,
   Shield,
-  Smartphone,
-  Star,
   Trophy,
   Zap,
 } from 'lucide-react'
+import { HeroSection } from '@/components/landing/HeroSection'
 
 const features = [
   {
@@ -60,13 +58,6 @@ const features = [
   },
 ]
 
-const stats = [
-  { value: '2M+', label: 'Foods in Database' },
-  { value: '100%', label: 'Free Features' },
-  { value: 'AI', label: 'Powered Analysis' },
-  { value: '0', label: 'Ads or Paywalls' },
-]
-
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-nt-bg overflow-hidden">
@@ -96,69 +87,7 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="pt-32 pb-20 px-6 relative">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-nt-accent/5 rounded-full blur-3xl" />
-          <div className="absolute top-1/3 left-1/4 w-[300px] h-[300px] bg-purple-500/5 rounded-full blur-2xl" />
-        </div>
-
-        <div className="max-w-5xl mx-auto text-center relative">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <div className="inline-flex items-center gap-2 bg-nt-card border border-nt-accent/30 rounded-full px-4 py-1.5 text-sm text-nt-text-secondary mb-8">
-              <Star className="w-3.5 h-3.5 text-nt-accent" fill="currentColor" />
-              <span>The future of nutrition tracking is here</span>
-            </div>
-
-            <h1 className="text-5xl md:text-7xl font-bold mb-6 leading-tight">
-              Track Nutrition
-              <br />
-              <span className="gradient-text">Effortlessly</span>
-            </h1>
-
-            <p className="text-xl text-nt-text-secondary mb-10 max-w-2xl mx-auto">
-              The most powerful calorie and nutrition tracker — completely free. AI meal analysis,
-              smart meal plans, barcode scanning, and beautiful analytics.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                href="/register"
-                className="group inline-flex items-center gap-2 bg-nt-accent hover:bg-nt-accent-hover text-white px-8 py-4 rounded-2xl text-lg font-semibold transition-all duration-300 hover:shadow-xl hover:shadow-nt-accent/30 hover:-translate-y-0.5"
-              >
-                Start for Free
-                <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </Link>
-              <Link
-                href="/login"
-                className="inline-flex items-center gap-2 border border-nt-border hover:border-nt-border-light text-white px-8 py-4 rounded-2xl text-lg font-medium transition-all duration-300 hover:bg-nt-card"
-              >
-                <Smartphone className="w-5 h-5" />
-                View Demo
-              </Link>
-            </div>
-          </motion.div>
-
-          {/* Stats */}
-          <motion.div
-            initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.3 }}
-            className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-20"
-          >
-            {stats.map((stat) => (
-              <div key={stat.label} className="glass-card p-6">
-                <div className="text-3xl font-bold gradient-text mb-1">{stat.value}</div>
-                <div className="text-sm text-nt-text-secondary">{stat.label}</div>
-              </div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
+      <HeroSection />
 
       {/* Dashboard Preview */}
       <section className="py-16 px-6">

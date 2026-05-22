@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie,
@@ -35,29 +35,37 @@ export default function AnalyticsPage() {
     queryFn: () => api.get(`/weight?limit=${period}`).then((r) => r.data),
   })
 
-  const dailyData = nutritionData?.dailySummaries?.map((d: any) => ({
-    date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    Calories: Math.round(d.calories),
-    Protein: Math.round(d.protein),
-    Carbs: Math.round(d.carbs),
-    Fats: Math.round(d.fats),
-  })) || []
-
-  const weightChartData = weightData?.entries?.map((e: any) => ({
-    date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    weight: e.weight,
-  })) || []
-
   const averages = nutritionData?.averages || {}
   const dailyGoal = user?.dailyCalories || 2000
 
-  // Macro distribution pie
-  const macroTotal = (averages.protein || 0) * 4 + (averages.carbs || 0) * 4 + (averages.fats || 0) * 9
-  const pieData = macroTotal > 0 ? [
-    { name: 'Protein', value: Math.round(((averages.protein || 0) * 4 / macroTotal) * 100), color: '#3b82f6' },
-    { name: 'Carbs', value: Math.round(((averages.carbs || 0) * 4 / macroTotal) * 100), color: '#f59e0b' },
-    { name: 'Fats', value: Math.round(((averages.fats || 0) * 9 / macroTotal) * 100), color: '#ef4444' },
-  ] : []
+  const dailyData = useMemo(() =>
+    nutritionData?.dailySummaries?.map((d: any) => ({
+      date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      Calories: Math.round(d.calories),
+      Protein: Math.round(d.protein),
+      Carbs: Math.round(d.carbs),
+      Fats: Math.round(d.fats),
+    })) ?? [],
+    [nutritionData?.dailySummaries],
+  )
+
+  const weightChartData = useMemo(() =>
+    weightData?.entries?.map((e: any) => ({
+      date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      weight: e.weight,
+    })) ?? [],
+    [weightData?.entries],
+  )
+
+  const pieData = useMemo(() => {
+    const macroTotal = (averages.protein || 0) * 4 + (averages.carbs || 0) * 4 + (averages.fats || 0) * 9
+    if (macroTotal === 0) return []
+    return [
+      { name: 'Protein', value: Math.round(((averages.protein || 0) * 4 / macroTotal) * 100), color: '#3b82f6' },
+      { name: 'Carbs',   value: Math.round(((averages.carbs   || 0) * 4 / macroTotal) * 100), color: '#f59e0b' },
+      { name: 'Fats',    value: Math.round(((averages.fats    || 0) * 9 / macroTotal) * 100), color: '#ef4444' },
+    ]
+  }, [averages.protein, averages.carbs, averages.fats])
 
   const tooltipStyle = {
     contentStyle: { background: '#171923', border: '1px solid #1f2937', borderRadius: 12 },

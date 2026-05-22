@@ -15,7 +15,7 @@ import achievementsRoutes from './routes/achievements'
 import socialRoutes from './routes/social'
 
 const prisma = new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  log: ['error'],
 })
 
 export const app: FastifyPluginAsync = fp(async (fastify: FastifyInstance) => {

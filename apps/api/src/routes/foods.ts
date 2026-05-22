@@ -190,15 +190,33 @@ const foodsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.get('/recent/list', { preHandler: authenticate }, async (request, reply) => {
     const { sub: userId } = getUser(request)
 
-    const recentEntries = await fastify.prisma.mealEntry.findMany({
+    // Fetch more than needed then deduplicate in JS — avoids the slow
+    // Prisma `distinct` subquery on an unindexed column combination.
+    const entries = await fastify.prisma.mealEntry.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      distinct: ['foodId'],
-      include: { food: true },
+      orderBy: { date: 'desc' },
+      take: 100,
+      select: {
+        foodId: true,
+        food: {
+          select: {
+            id: true, name: true, brand: true, calories: true,
+            protein: true, carbs: true, fats: true,
+            servingSize: true, servingUnit: true, imageUrl: true,
+            isVerified: true, isPublic: true,
+          },
+        },
+      },
     })
 
-    const foods = recentEntries.map((e) => e.food)
+    const seen = new Set<string>()
+    const foods = []
+    for (const e of entries) {
+      if (!seen.has(e.foodId) && foods.length < 20) {
+        seen.add(e.foodId)
+        foods.push(e.food)
+      }
+    }
     return reply.send(foods)
   })
 

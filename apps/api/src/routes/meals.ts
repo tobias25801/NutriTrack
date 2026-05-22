@@ -20,7 +20,15 @@ const mealsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         userId,
         date: { gte: startOfDay, lte: endOfDay },
       },
-      include: { food: true },
+      include: {
+        food: {
+          select: {
+            id: true, name: true, brand: true, calories: true,
+            protein: true, carbs: true, fats: true,
+            servingSize: true, servingUnit: true, imageUrl: true,
+          },
+        },
+      },
       orderBy: { date: 'asc' },
     })
 
@@ -157,39 +165,43 @@ const mealsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     start.setHours(0, 0, 0, 0)
     end.setHours(23, 59, 59, 999)
 
-    const entries = await fastify.prisma.mealEntry.findMany({
-      where: { userId, date: { gte: start, lte: end } },
-      orderBy: { date: 'asc' },
-    })
+    // Aggregate in the database — avoids loading every row into Node memory
+    type SummaryRow = { date: Date; calories: number; protein: number; carbs: number; fats: number; count: bigint }
+    const rows = await fastify.prisma.$queryRaw<SummaryRow[]>`
+      SELECT
+        date_trunc('day', date AT TIME ZONE 'UTC') AS date,
+        SUM(calories)::float  AS calories,
+        SUM(protein)::float   AS protein,
+        SUM(carbs)::float     AS carbs,
+        SUM(fats)::float      AS fats,
+        COUNT(*)              AS count
+      FROM meal_entries
+      WHERE user_id = ${userId}
+        AND date >= ${start}
+        AND date <= ${end}
+      GROUP BY date_trunc('day', date AT TIME ZONE 'UTC')
+      ORDER BY date_trunc('day', date AT TIME ZONE 'UTC')
+    `
 
-    // Group by day
-    const byDay = new Map<string, { calories: number; protein: number; carbs: number; fats: number; count: number }>()
+    const dailySummaries = rows.map((r) => ({
+      date: r.date.toISOString().split('T')[0],
+      calories: r.calories,
+      protein: r.protein,
+      carbs: r.carbs,
+      fats: r.fats,
+      count: Number(r.count),
+    }))
 
-    for (const entry of entries) {
-      const day = entry.date.toISOString().split('T')[0]
-      const existing = byDay.get(day) || { calories: 0, protein: 0, carbs: 0, fats: 0, count: 0 }
-      byDay.set(day, {
-        calories: existing.calories + entry.calories,
-        protein: existing.protein + entry.protein,
-        carbs: existing.carbs + entry.carbs,
-        fats: existing.fats + entry.fats,
-        count: existing.count + 1,
-      })
-    }
-
-    const dailySummaries = Array.from(byDay.entries()).map(([date, data]) => ({ date, ...data }))
-
-    const totals = entries.reduce(
-      (acc, e) => ({
-        calories: acc.calories + e.calories,
-        protein: acc.protein + e.protein,
-        carbs: acc.carbs + e.carbs,
-        fats: acc.fats + e.fats,
+    const days = dailySummaries.length || 1
+    const totals = dailySummaries.reduce(
+      (acc, d) => ({
+        calories: acc.calories + d.calories,
+        protein: acc.protein + d.protein,
+        carbs: acc.carbs + d.carbs,
+        fats: acc.fats + d.fats,
       }),
       { calories: 0, protein: 0, carbs: 0, fats: 0 }
     )
-
-    const days = dailySummaries.length || 1
     const averages = {
       calories: totals.calories / days,
       protein: totals.protein / days,

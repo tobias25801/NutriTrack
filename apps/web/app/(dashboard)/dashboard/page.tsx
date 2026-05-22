@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Droplets, Footprints, Plus, Sparkles, Target, TrendingUp } from 'lucide-react'
@@ -25,13 +26,13 @@ export default function DashboardPage() {
   const { data: todayData } = useQuery({
     queryKey: ['meals', 'today'],
     queryFn: () => api.get('/meals').then((r) => r.data),
-    refetchInterval: 30000,
+    refetchInterval: 60000,
   })
 
   const { data: waterData } = useQuery({
     queryKey: ['water', 'today'],
     queryFn: () => api.get('/water/today').then((r) => r.data),
-    refetchInterval: 30000,
+    refetchInterval: 60000,
   })
 
   const { data: weightData } = useQuery({
@@ -49,31 +50,16 @@ export default function DashboardPage() {
   const waterTotal = waterData?.total || 0
   const waterGoal = waterData?.goal || user?.dailyWater || 2000
 
-  const macros = [
-    {
-      type: 'protein' as const,
-      label: 'Protein',
-      value: totals.protein,
-      goal: user?.dailyProtein || 150,
-      unit: 'g',
-    },
-    {
-      type: 'carbs' as const,
-      label: 'Carbs',
-      value: totals.carbs,
-      goal: user?.dailyCarbs || 200,
-      unit: 'g',
-    },
-    {
-      type: 'fats' as const,
-      label: 'Fats',
-      value: totals.fats,
-      goal: user?.dailyFat || 67,
-      unit: 'g',
-    },
-  ]
+  const macros = useMemo(() => [
+    { type: 'protein' as const, label: 'Protein', value: totals.protein, goal: user?.dailyProtein || 150, unit: 'g' },
+    { type: 'carbs' as const,   label: 'Carbs',   value: totals.carbs,   goal: user?.dailyCarbs || 200,   unit: 'g' },
+    { type: 'fats' as const,    label: 'Fats',    value: totals.fats,    goal: user?.dailyFat || 67,       unit: 'g' },
+  ], [totals.protein, totals.carbs, totals.fats, user?.dailyProtein, user?.dailyCarbs, user?.dailyFat])
 
-  const recentEntries = todayData?.entries?.slice(-3).reverse() || []
+  const recentEntries = useMemo(
+    () => todayData?.entries?.slice(-3).reverse() ?? [],
+    [todayData?.entries],
+  )
 
   return (
     <div className="space-y-6">

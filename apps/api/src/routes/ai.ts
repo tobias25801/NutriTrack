@@ -150,7 +150,8 @@ const aiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }
 
     try {
-      const response = await chatWithCoach(messages, context)
+      // Cap history to last 10 messages — prevents unbounded payload growth
+      const response = await chatWithCoach(messages.slice(-10), context)
       return reply.send({ message: response })
     } catch (error: any) {
       fastify.log.error(error)

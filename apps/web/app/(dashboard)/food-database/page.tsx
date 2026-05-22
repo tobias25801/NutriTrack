@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Barcode, Heart, Loader2, Plus, Search, Star } from 'lucide-react'
@@ -11,7 +11,6 @@ export default function FoodDatabasePage() {
   const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [debounceTimer, setDebounceTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
   const [page, setPage] = useState(1)
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -20,12 +19,15 @@ export default function FoodDatabasePage() {
     fiber: '', servingSize: '100', servingUnit: 'g', isPublic: false,
   })
 
+  // Debounce search query — cleans up on unmount and on every change
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300)
+    return () => clearTimeout(timer)
+  }, [query])
+
   const handleQueryChange = (value: string) => {
     setQuery(value)
     setPage(1)
-    if (debounceTimer) clearTimeout(debounceTimer)
-    const timer = setTimeout(() => setDebouncedQuery(value), 300)
-    setDebounceTimer(timer)
   }
 
   const { data, isLoading } = useQuery({

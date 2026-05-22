@@ -54,7 +54,7 @@ export default function AICoachPage() {
 
     try {
       const { data } = await api.post('/ai/chat', {
-        messages: [...messages, userMessage].map((m) => ({ role: m.role, content: m.content })),
+        messages: [...messages, userMessage].slice(-10).map((m) => ({ role: m.role, content: m.content })),
         context: {
           goal: user?.goal,
           weight: user?.weight,

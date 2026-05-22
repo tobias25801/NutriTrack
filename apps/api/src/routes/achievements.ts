@@ -14,13 +14,14 @@ const achievementsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) 
       }),
     ])
 
-    const unlockedIds = new Set(unlocked.map((u) => u.achievementId))
+    // O(1) lookup instead of O(n) find() per achievement
+    const unlockedMap = new Map(unlocked.map((u) => [u.achievementId, u.unlockedAt]))
 
     return reply.send({
       achievements: all.map((a) => ({
         ...a,
-        unlocked: unlockedIds.has(a.id),
-        unlockedAt: unlocked.find((u) => u.achievementId === a.id)?.unlockedAt,
+        unlocked: unlockedMap.has(a.id),
+        unlockedAt: unlockedMap.get(a.id),
       })),
       unlockedCount: unlocked.length,
       totalCount: all.length,

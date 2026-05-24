@@ -15,6 +15,7 @@ interface User {
   dailyCarbs: number
   dailyFat: number
   dailyWater: number
+  dailySteps?: number
   avatarUrl?: string
   xp: number
   level: number

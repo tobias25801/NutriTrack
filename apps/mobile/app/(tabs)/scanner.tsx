@@ -70,7 +70,7 @@ export default function ScannerScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.center}>
-          <Ionicons name="camera-off-outline" size={64} color={Colors.textMuted} />
+          <Ionicons name="camera-outline" size={64} color={Colors.textMuted} />
           <Text style={styles.message}>Camera access required for scanning</Text>
           <TouchableOpacity
             style={styles.permissionBtn}

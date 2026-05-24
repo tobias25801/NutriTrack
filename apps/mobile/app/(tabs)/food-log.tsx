@@ -1,13 +1,13 @@
 import React, { useState } from 'react'
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, FlatList, ActivityIndicator,
+  Alert, View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, FlatList, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { Colors, Spacing, BorderRadius } from '../../constants/theme'
-import { toast } from 'sonner-native'
+const toast = { success: (msg: string) => Alert.alert('', msg), error: (msg: string) => Alert.alert('Error', msg) }
 
 const MEAL_TYPES = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'] as const
 const MEAL_EMOJIS = { BREAKFAST: '🌅', LUNCH: '☀️', DINNER: '🌙', SNACK: '🍎' }

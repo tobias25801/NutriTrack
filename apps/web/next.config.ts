@@ -3,6 +3,7 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   compress: true,
   poweredByHeader: false,
+  transpilePackages: ['framer-motion'],
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: '**.supabase.co' },
@@ -12,9 +13,7 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'avatars.githubusercontent.com' },
     ],
   },
-  experimental: {
-    optimizePackageImports: ['lucide-react', 'recharts'],
-  },
+  experimental: {},
 }
 
 export default nextConfig

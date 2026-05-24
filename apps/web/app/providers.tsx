@@ -2,10 +2,18 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+import dynamic from 'next/dynamic'
 import { useState } from 'react'
 import { Toaster } from 'sonner'
-import { OfflineIndicator } from '@/components/OfflineIndicator'
-import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar'
+
+const OfflineIndicator = dynamic(
+  () => import('@/components/OfflineIndicator').then((m) => ({ default: m.OfflineIndicator })),
+  { ssr: false }
+)
+const ServiceWorkerRegistrar = dynamic(
+  () => import('@/components/ServiceWorkerRegistrar').then((m) => ({ default: m.ServiceWorkerRegistrar })),
+  { ssr: false }
+)
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(

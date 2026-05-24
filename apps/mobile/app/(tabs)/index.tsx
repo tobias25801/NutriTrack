@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { router } from 'expo-router'
 import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../lib/api'
 import { Colors, Spacing, BorderRadius } from '../../constants/theme'
@@ -143,10 +144,10 @@ export default function DashboardScreen() {
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
             </Text>
           </View>
-          {user?.streak > 0 && (
+          {(user?.streak ?? 0) > 0 && (
             <View style={styles.streak}>
               <Text style={styles.streakEmoji}>🔥</Text>
-              <Text style={styles.streakText}>{user.streak}</Text>
+              <Text style={styles.streakText}>{user?.streak}</Text>
             </View>
           )}
         </View>
@@ -202,11 +203,12 @@ export default function DashboardScreen() {
 
         {/* Steps */}
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
+          <TouchableOpacity onPress={() => router.push('/steps')} style={styles.cardHeader}>
             <Ionicons name="walk-outline" size={18} color="#22c55e" />
             <Text style={styles.cardTitle}>Steps</Text>
             <Text style={styles.cardSubtitle}>{steps.toLocaleString()}/{stepGoal.toLocaleString()}</Text>
-          </View>
+            <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
+          </TouchableOpacity>
           <View style={[styles.waterProgress, { marginBottom: Spacing.sm }]}>
             <View style={[styles.waterFill, { width: `${stepPct}%`, backgroundColor: '#22c55e' }]} />
           </View>
@@ -239,11 +241,12 @@ export default function DashboardScreen() {
 
         {/* Fasting */}
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
+          <TouchableOpacity onPress={() => router.push('/fasting')} style={styles.cardHeader}>
             <Ionicons name="timer-outline" size={18} color="#f97316" />
             <Text style={styles.cardTitle}>{activeFast ? 'Fasting' : 'Intermittent Fasting'}</Text>
             {activeFast && <Text style={styles.cardSubtitle}>{activeFast.targetHours}h goal</Text>}
-          </View>
+            <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
+          </TouchableOpacity>
           {activeFast ? (
             <>
               <Text style={{ fontSize: 26, fontWeight: '800', color: fastPct >= 100 ? '#22c55e' : Colors.text, fontVariant: ['tabular-nums'] }}>

@@ -30,6 +30,8 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0f1115' } }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="auth" options={{ headerShown: false }} />
+          <Stack.Screen name="fasting" options={{ headerShown: false, animation: 'slide_from_right' }} />
+          <Stack.Screen name="steps" options={{ headerShown: false, animation: 'slide_from_right' }} />
         </Stack>
       </QueryClientProvider>
     </GestureHandlerRootView>

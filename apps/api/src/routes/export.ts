@@ -168,6 +168,214 @@ const exportRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.status(400).send({ error: 'Invalid type. Use: nutrition, weight, steps, fasting' })
   })
 
+  // Import nutrition (meal entries) data
+  fastify.post('/import/nutrition', { preHandler: authenticate }, async (request, reply) => {
+    const { sub: userId } = getUser(request)
+
+    const entrySchema = z.object({
+      date: z.string(),
+      foodName: z.string().min(1).max(200),
+      brand: z.string().max(100).optional(),
+      mealType: z.enum(['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK']).default('BREAKFAST'),
+      grams: z.number().min(0.1).max(10000),
+      calories: z.number().min(0).max(10000),
+      protein: z.number().min(0).max(1000),
+      carbs: z.number().min(0).max(1000),
+      fats: z.number().min(0).max(1000),
+    })
+
+    const schema = z.object({
+      entries: z.array(entrySchema).min(1).max(5000),
+      overwrite: z.boolean().default(false),
+    })
+
+    const result = schema.safeParse(request.body)
+    if (!result.success) {
+      return reply.status(400).send({ error: 'Validation error', details: result.error.issues })
+    }
+
+    const { entries, overwrite } = result.data
+    let imported = 0
+    let skipped = 0
+    let errors: { row: number; reason: string }[] = []
+
+    // Batch: find or create foods, then bulk-create entries
+    const foodCache = new Map<string, string>() // "name|brand" -> foodId
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i]
+
+      const date = new Date(entry.date)
+      if (isNaN(date.getTime())) {
+        errors.push({ row: i + 1, reason: `Invalid date: ${entry.date}` })
+        skipped++
+        continue
+      }
+
+      // Compute nutrition per 100g (normalise for food storage)
+      const ratio = entry.grams / 100
+      const cal100 = entry.grams > 0 ? (entry.calories / ratio) : entry.calories
+      const pro100 = entry.grams > 0 ? (entry.protein / ratio) : entry.protein
+      const carb100 = entry.grams > 0 ? (entry.carbs / ratio) : entry.carbs
+      const fat100 = entry.grams > 0 ? (entry.fats / ratio) : entry.fats
+
+      if (overwrite === false) {
+        // Duplicate detection: same food + date + mealType
+        const startOfDay = new Date(date)
+        startOfDay.setHours(0, 0, 0, 0)
+        const endOfDay = new Date(date)
+        endOfDay.setHours(23, 59, 59, 999)
+
+        const cacheKey = `${entry.foodName}|${entry.brand || ''}`
+        let foodId = foodCache.get(cacheKey)
+
+        if (!foodId) {
+          const existingFood = await fastify.prisma.food.findFirst({
+            where: { name: entry.foodName, isPublic: true },
+          })
+          if (existingFood) {
+            foodId = existingFood.id
+          } else {
+            const newFood = await fastify.prisma.food.create({
+              data: {
+                name: entry.foodName,
+                brand: entry.brand,
+                calories: Math.round(cal100 * 100) / 100,
+                protein: Math.round(pro100 * 100) / 100,
+                carbs: Math.round(carb100 * 100) / 100,
+                fats: Math.round(fat100 * 100) / 100,
+                servingSize: 100,
+                servingUnit: 'g',
+                isPublic: true,
+                isVerified: false,
+              },
+            })
+            foodId = newFood.id
+          }
+          foodCache.set(cacheKey, foodId)
+        }
+
+        const existing = await fastify.prisma.mealEntry.findFirst({
+          where: {
+            userId,
+            foodId,
+            mealType: entry.mealType,
+            date: { gte: startOfDay, lte: endOfDay },
+          },
+        })
+
+        if (existing) { skipped++; continue }
+
+        await fastify.prisma.mealEntry.create({
+          data: {
+            userId,
+            foodId,
+            grams: entry.grams,
+            mealType: entry.mealType,
+            date,
+            calories: entry.calories,
+            protein: entry.protein,
+            carbs: entry.carbs,
+            fats: entry.fats,
+          },
+        })
+        imported++
+      } else {
+        const cacheKey = `${entry.foodName}|${entry.brand || ''}`
+        let foodId = foodCache.get(cacheKey)
+
+        if (!foodId) {
+          const existingFood = await fastify.prisma.food.findFirst({
+            where: { name: entry.foodName, isPublic: true },
+          })
+          foodId = existingFood?.id ?? (await fastify.prisma.food.create({
+            data: {
+              name: entry.foodName,
+              brand: entry.brand,
+              calories: Math.round(cal100 * 100) / 100,
+              protein: Math.round(pro100 * 100) / 100,
+              carbs: Math.round(carb100 * 100) / 100,
+              fats: Math.round(fat100 * 100) / 100,
+              servingSize: 100,
+              servingUnit: 'g',
+              isPublic: true,
+              isVerified: false,
+            },
+          })).id
+          foodCache.set(cacheKey, foodId)
+        }
+
+        await fastify.prisma.mealEntry.create({
+          data: {
+            userId,
+            foodId,
+            grams: entry.grams,
+            mealType: entry.mealType,
+            date,
+            calories: entry.calories,
+            protein: entry.protein,
+            carbs: entry.carbs,
+            fats: entry.fats,
+          },
+        })
+        imported++
+      }
+    }
+
+    return reply.send({ imported, skipped, errors: errors.slice(0, 50), total: entries.length })
+  })
+
+  // Preview import before committing (validates without saving)
+  fastify.post('/import/preview', { preHandler: authenticate }, async (_request, reply) => {
+    const request = _request as any
+    const entrySchema = z.object({
+      date: z.string(),
+      foodName: z.string().min(1).max(200),
+      brand: z.string().max(100).optional(),
+      mealType: z.enum(['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK']).default('BREAKFAST'),
+      grams: z.number().min(0.1).max(10000),
+      calories: z.number().min(0).max(10000),
+      protein: z.number().min(0).max(1000),
+      carbs: z.number().min(0).max(1000),
+      fats: z.number().min(0).max(1000),
+    })
+
+    const schema = z.object({
+      entries: z.array(entrySchema).min(1).max(5000),
+    })
+
+    const result = schema.safeParse(request.body)
+    if (!result.success) {
+      return reply.status(400).send({ error: 'Validation error', details: result.error.issues })
+    }
+
+    const { entries } = result.data
+    const valid: typeof entries = []
+    const invalid: { row: number; entry: any; reason: string }[] = []
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i]
+      const date = new Date(entry.date)
+      if (isNaN(date.getTime())) {
+        invalid.push({ row: i + 1, entry, reason: `Invalid date: ${entry.date}` })
+        continue
+      }
+      if (entry.calories < 0 || entry.protein < 0 || entry.carbs < 0 || entry.fats < 0) {
+        invalid.push({ row: i + 1, entry, reason: 'Negative nutrient values' })
+        continue
+      }
+      valid.push(entry)
+    }
+
+    return reply.send({
+      validCount: valid.length,
+      invalidCount: invalid.length,
+      preview: valid.slice(0, 10),
+      errors: invalid.slice(0, 20),
+      total: entries.length,
+    })
+  })
+
   // Import weight data
   fastify.post('/import/weight', { preHandler: authenticate }, async (request, reply) => {
     const { sub: userId } = getUser(request)

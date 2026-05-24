@@ -12,14 +12,77 @@ import { toast } from 'sonner'
 import { calculateBMR, calculateTDEE, getGoalCalories } from '@/lib/utils'
 
 type Tab = 'profile' | 'goals' | 'account'
+type ImportType = 'weight' | 'nutrition'
+type ImportStep = 'idle' | 'parsing' | 'preview' | 'importing' | 'done'
+
+interface NutritionEntry {
+  date: string; foodName: string; brand?: string; mealType: string
+  grams: number; calories: number; protein: number; carbs: number; fats: number
+}
+interface WeightEntry {
+  date: string; weight: number; bodyFat?: number; muscleMass?: number; note?: string
+}
+interface PreviewState {
+  validCount: number; invalidCount: number; total: number
+  preview: any[]; errors: { row: number; entry?: any; reason: string }[]
+  payload: any
+}
+
+function parseCSVLine(line: string): string[] {
+  const cols: string[] = []
+  let inQuote = false; let cur = ''
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"') {
+      if (inQuote && line[i + 1] === '"') { cur += '"'; i++ } else inQuote = !inQuote
+    } else if (line[i] === ',' && !inQuote) { cols.push(cur.trim()); cur = '' }
+    else cur += line[i]
+  }
+  cols.push(cur.trim()); return cols
+}
+
+const MEAL_TYPES = new Set(['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'])
+
+function parseNutritionCSV(text: string): NutritionEntry[] {
+  const lines = text.trim().split(/\r?\n/)
+  if (lines.length < 2) return []
+  return lines.slice(1).map((line) => {
+    const c = parseCSVLine(line)
+    const mealType = c[3]?.toUpperCase()
+    return {
+      date: c[0] || '', foodName: c[1] || '', brand: c[2] || undefined,
+      mealType: MEAL_TYPES.has(mealType) ? mealType : 'BREAKFAST',
+      grams: parseFloat(c[4] || '100') || 100, calories: parseFloat(c[5] || '0') || 0,
+      protein: parseFloat(c[6] || '0') || 0, carbs: parseFloat(c[7] || '0') || 0,
+      fats: parseFloat(c[8] || '0') || 0,
+    }
+  }).filter((e) => e.date && e.foodName)
+}
+
+function parseWeightCSV(text: string): WeightEntry[] {
+  const lines = text.trim().split(/\r?\n/)
+  if (lines.length < 2) return []
+  return lines.slice(1).map((line) => {
+    const c = parseCSVLine(line)
+    return {
+      date: c[0] || '', weight: parseFloat(c[1] || '0'),
+      bodyFat: c[2] ? parseFloat(c[2]) || undefined : undefined,
+      muscleMass: c[3] ? parseFloat(c[3]) || undefined : undefined,
+      note: c[4] || undefined,
+    }
+  }).filter((e) => e.date && e.weight > 0)
+}
 
 export default function SettingsPage() {
   const { user, setUser } = useAuthStore()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<Tab>('profile')
-  const [importStatus, setImportStatus] = useState<'idle' | 'parsing' | 'success' | 'error'>('idle')
-  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; total: number } | null>(null)
-  const [importType, setImportType] = useState<'weight'>('weight')
+
+  // Import wizard state
+  const [importType, setImportType] = useState<ImportType>('nutrition')
+  const [importStep, setImportStep] = useState<ImportStep>('idle')
+  const [isDragging, setIsDragging] = useState(false)
+  const [previewData, setPreviewData] = useState<PreviewState | null>(null)
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; total: number; errors?: any[] } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [profile, setProfile] = useState({
@@ -49,39 +112,27 @@ export default function SettingsPage() {
         age: profile.age ? parseInt(profile.age) : undefined,
         height: profile.height ? parseFloat(profile.height) : undefined,
         weight: profile.weight ? parseFloat(profile.weight) : undefined,
-        gender: profile.gender,
-        units: profile.units,
+        gender: profile.gender, units: profile.units,
       }),
-    onSuccess: (res) => {
-      setUser(res.data.user)
-      toast.success('Profile updated! ✓')
-    },
+    onSuccess: (res) => { setUser(res.data.user); toast.success('Profile updated! ✓') },
     onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to update'),
   })
 
   const updateGoals = useMutation({
     mutationFn: () =>
       api.put('/auth/me', {
-        goal: goals.goal,
-        activityLevel: goals.activityLevel,
-        dailyCalories: parseInt(goals.dailyCalories),
-        dailyProtein: parseInt(goals.dailyProtein),
-        dailyCarbs: parseInt(goals.dailyCarbs),
-        dailyFat: parseInt(goals.dailyFat),
-        dailyWater: parseInt(goals.dailyWater),
-        dailySteps: parseInt(goals.dailySteps),
+        goal: goals.goal, activityLevel: goals.activityLevel,
+        dailyCalories: parseInt(goals.dailyCalories), dailyProtein: parseInt(goals.dailyProtein),
+        dailyCarbs: parseInt(goals.dailyCarbs), dailyFat: parseInt(goals.dailyFat),
+        dailyWater: parseInt(goals.dailyWater), dailySteps: parseInt(goals.dailySteps),
       }),
-    onSuccess: (res) => {
-      setUser(res.data.user)
-      toast.success('Goals updated! ✓')
-    },
+    onSuccess: (res) => { setUser(res.data.user); toast.success('Goals updated! ✓') },
     onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to update'),
   })
 
   const autoCalculate = () => {
     if (!profile.age || !profile.height || !profile.weight) {
-      toast.error('Please fill in age, height, and weight first')
-      return
+      toast.error('Please fill in age, height, and weight first'); return
     }
     const bmr = calculateBMR(parseFloat(profile.weight), parseFloat(profile.height), parseInt(profile.age), profile.gender)
     const tdee = calculateTDEE(bmr, goals.activityLevel)
@@ -90,70 +141,85 @@ export default function SettingsPage() {
     const fats = Math.round((calories * 0.3) / 9)
     const carbs = Math.round((calories - protein * 4 - fats * 9) / 4)
     setGoals((prev) => ({ ...prev, dailyCalories: calories.toString(), dailyProtein: protein.toString(), dailyCarbs: carbs.toString(), dailyFat: fats.toString() }))
-    toast.success('Goals calculated based on your stats!')
+    toast.success('Goals calculated!')
   }
 
   const downloadFile = (url: string, filename: string) => {
     api.get(url, { responseType: 'blob' }).then((res) => {
       const blobUrl = URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(blobUrl)
-      toast.success('Download started!')
+      a.href = blobUrl; a.download = filename; a.click()
+      URL.revokeObjectURL(blobUrl); toast.success('Download started!')
     }).catch(() => toast.error('Export failed'))
   }
 
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const resetImport = () => {
+    setImportStep('idle'); setPreviewData(null); setImportResult(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
-    setImportStatus('parsing')
-    setImportResult(null)
-
+  const processFile = async (file: File) => {
+    if (!file.name.match(/\.(json|csv)$/i)) {
+      toast.error('Unsupported format. Use JSON or CSV.'); return
+    }
+    setImportStep('parsing')
     try {
       const text = await file.text()
-      let data: any
 
-      if (file.name.endsWith('.json')) {
-        data = JSON.parse(text)
-        // Handle full JSON export format
-        if (data.weightEntries) {
-          data = { entries: data.weightEntries, overwrite: false }
+      if (importType === 'nutrition') {
+        let entries: NutritionEntry[]
+        if (file.name.endsWith('.json')) {
+          const json = JSON.parse(text)
+          entries = json.mealEntries ?? json.entries ?? []
+        } else {
+          entries = parseNutritionCSV(text)
         }
-      } else if (file.name.endsWith('.csv')) {
-        // Parse CSV
-        const lines = text.trim().split('\n')
-        const headers = lines[0].split(',').map((h) => h.trim().replace(/"/g, ''))
-        data = {
-          entries: lines.slice(1).map((line) => {
-            const vals = line.split(',')
-            return {
-              date: vals[0]?.replace(/"/g, '').trim(),
-              weight: parseFloat(vals[1] || '0'),
-              bodyFat: vals[2] ? parseFloat(vals[2]) || undefined : undefined,
-              muscleMass: vals[3] ? parseFloat(vals[3]) || undefined : undefined,
-              note: vals[4]?.replace(/"/g, '').trim() || undefined,
-            }
-          }).filter((e) => e.date && e.weight > 0),
-          overwrite: false,
-        }
+        if (entries.length === 0) throw new Error('No valid entries found in file')
+        const res = await api.post('/export/import/preview', { entries })
+        setPreviewData({ ...res.data, payload: { entries, overwrite: false } })
+        setImportStep('preview')
       } else {
-        throw new Error('Unsupported file format. Use JSON or CSV.')
+        let entries: WeightEntry[]
+        if (file.name.endsWith('.json')) {
+          const json = JSON.parse(text)
+          entries = json.weightEntries ?? json.entries ?? []
+        } else {
+          entries = parseWeightCSV(text)
+        }
+        if (entries.length === 0) throw new Error('No valid entries found in file')
+        setPreviewData({
+          validCount: entries.length, invalidCount: 0, total: entries.length,
+          preview: entries.slice(0, 10), errors: [],
+          payload: { entries, overwrite: false },
+        })
+        setImportStep('preview')
       }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to parse file')
+      setImportStep('idle')
+    }
+  }
 
-      const res = await api.post(`/export/import/${importType}`, data)
+  const confirmImport = async () => {
+    if (!previewData?.payload) return
+    setImportStep('importing')
+    try {
+      const endpoint = importType === 'nutrition' ? '/export/import/nutrition' : '/export/import/weight'
+      const res = await api.post(endpoint, previewData.payload)
       setImportResult(res.data)
-      setImportStatus('success')
-      queryClient.invalidateQueries({ queryKey: ['weight'] })
+      setImportStep('done')
+      queryClient.invalidateQueries({ queryKey: [importType === 'nutrition' ? 'meals' : 'weight'] })
       toast.success(`Imported ${res.data.imported} entries!`)
     } catch (err: any) {
-      setImportStatus('error')
-      toast.error(err.response?.data?.error || err.message || 'Import failed')
+      toast.error(err.response?.data?.error || 'Import failed')
+      setImportStep('idle')
     }
+  }
 
-    if (fileInputRef.current) fileInputRef.current.value = ''
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setIsDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file) processFile(file)
   }
 
   const tabs: { id: Tab; label: string; icon: typeof User }[] = [
@@ -169,14 +235,10 @@ export default function SettingsPage() {
         <p className="text-nt-text-secondary text-sm">Manage your profile and preferences</p>
       </div>
 
-      {/* Tabs */}
       <div className="flex bg-nt-card rounded-xl p-1 gap-1">
         {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id ? 'bg-nt-accent text-white' : 'text-nt-text-secondary hover:text-white'}`}
-          >
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id ? 'bg-nt-accent text-white' : 'text-nt-text-secondary hover:text-white'}`}>
             <tab.icon className="w-4 h-4" />
             <span className="hidden md:inline">{tab.label}</span>
           </button>
@@ -196,13 +258,10 @@ export default function SettingsPage() {
             ].map((field) => (
               <div key={field.key}>
                 <label className="text-sm text-nt-text-secondary mb-1.5 block">{field.label}</label>
-                <input
-                  type={field.type || 'text'}
-                  value={(profile as any)[field.key]}
+                <input type={field.type || 'text'} value={(profile as any)[field.key]}
                   onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })}
                   placeholder={field.placeholder}
-                  className="w-full bg-nt-bg border border-nt-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-nt-accent transition-colors"
-                />
+                  className="w-full bg-nt-bg border border-nt-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-nt-accent transition-colors" />
               </div>
             ))}
             <div>
@@ -313,7 +372,6 @@ export default function SettingsPage() {
               Export Data
             </h2>
             <p className="text-nt-text-secondary text-sm mb-4">Download your data in various formats</p>
-
             <div className="space-y-3">
               <div className="p-3 bg-nt-bg rounded-xl flex items-center justify-between">
                 <div>
@@ -325,7 +383,6 @@ export default function SettingsPage() {
                   <Download className="w-3 h-3" /> Download
                 </button>
               </div>
-
               {[
                 { label: 'Nutrition Log (CSV)', type: 'nutrition', desc: 'All meal entries' },
                 { label: 'Weight History (CSV)', type: 'weight', desc: 'Weight & body composition' },
@@ -346,61 +403,215 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Import */}
+          {/* Import Wizard */}
           <div className="glass-card p-6">
             <h2 className="font-semibold mb-1 flex items-center gap-2">
               <Upload className="w-4 h-4 text-green-400" />
               Import Data
             </h2>
-            <p className="text-nt-text-secondary text-sm mb-4">Import weight history from JSON or CSV</p>
+            <p className="text-nt-text-secondary text-sm mb-5">Import nutrition or weight history from JSON or CSV</p>
 
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm text-nt-text-secondary mb-1.5 block">Data Type</label>
-                <select value={importType} onChange={(e) => setImportType(e.target.value as 'weight')}
-                  className="bg-nt-bg border border-nt-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-nt-accent">
-                  <option value="weight">Weight History</option>
-                </select>
-              </div>
-
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-nt-border hover:border-nt-accent/50 rounded-xl p-8 text-center cursor-pointer transition-colors group"
-              >
-                <Upload className="w-8 h-8 text-nt-text-muted group-hover:text-nt-accent mx-auto mb-3 transition-colors" />
-                <div className="text-sm text-nt-text-secondary">
-                  Click to select a file, or drag and drop
+            {importStep === 'idle' && (
+              <div className="space-y-4">
+                {/* Type selector */}
+                <div className="grid grid-cols-2 gap-3">
+                  {([
+                    { value: 'nutrition' as ImportType, label: 'Nutrition Log', desc: 'Meal entries (CSV / JSON)' },
+                    { value: 'weight' as ImportType, label: 'Weight History', desc: 'Weight entries (CSV / JSON)' },
+                  ] as const).map((opt) => (
+                    <button key={opt.value} onClick={() => setImportType(opt.value)}
+                      className={`p-3 rounded-xl border text-left transition-all ${importType === opt.value ? 'border-nt-accent bg-nt-accent/10' : 'border-nt-border bg-nt-bg hover:border-nt-accent/40'}`}>
+                      <div className={`text-sm font-semibold ${importType === opt.value ? 'text-nt-accent' : 'text-white'}`}>{opt.label}</div>
+                      <div className="text-xs text-nt-text-muted mt-0.5">{opt.desc}</div>
+                    </button>
+                  ))}
                 </div>
-                <div className="text-xs text-nt-text-muted mt-1">Supports JSON and CSV</div>
-                <input ref={fileInputRef} type="file" accept=".json,.csv" className="hidden" onChange={handleImportFile} />
-              </div>
 
-              {importStatus === 'parsing' && (
-                <div className="flex items-center gap-2 text-sm text-nt-text-secondary p-3 bg-nt-bg rounded-xl">
-                  <Loader2 className="w-4 h-4 animate-spin text-nt-accent" />
-                  Processing file...
+                {/* Drop zone */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                  onDragLeave={(e) => { e.preventDefault(); setIsDragging(false) }}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${isDragging ? 'border-nt-accent bg-nt-accent/10 scale-[1.01]' : 'border-nt-border hover:border-nt-accent/50 hover:bg-nt-accent/5'}`}>
+                  <Upload className={`w-8 h-8 mx-auto mb-3 transition-colors ${isDragging ? 'text-nt-accent' : 'text-nt-text-muted'}`} />
+                  <div className="text-sm text-nt-text-secondary font-medium">
+                    {isDragging ? 'Drop file here' : 'Click to select or drag & drop'}
+                  </div>
+                  <div className="text-xs text-nt-text-muted mt-1">
+                    {importType === 'nutrition'
+                      ? 'CSV: Date, Food, Brand, Meal Type, Grams, Calories, Protein, Carbs, Fats'
+                      : 'CSV: Date, Weight, Body Fat, Muscle Mass, Note'}
+                  </div>
+                  <div className="text-xs text-nt-text-muted mt-0.5">Supports JSON and CSV</div>
+                  <input ref={fileInputRef} type="file" accept=".json,.csv" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f) }} />
                 </div>
-              )}
+              </div>
+            )}
 
-              {importStatus === 'success' && importResult && (
-                <div className="flex items-start gap-3 p-3 bg-green-500/10 border border-green-500/20 rounded-xl">
-                  <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5" />
-                  <div className="text-sm">
-                    <div className="text-green-400 font-medium">Import successful</div>
-                    <div className="text-nt-text-secondary text-xs mt-0.5">
-                      {importResult.imported} imported • {importResult.skipped} skipped • {importResult.total} total
+            {importStep === 'parsing' && (
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-nt-accent" />
+                <div className="text-sm text-nt-text-secondary">Analyzing file...</div>
+              </div>
+            )}
+
+            {importStep === 'preview' && previewData && (
+              <div className="space-y-4">
+                {/* Summary bar */}
+                <div className="flex gap-3">
+                  <div className="flex-1 p-3 bg-green-500/10 border border-green-500/20 rounded-xl">
+                    <div className="text-xl font-bold text-green-400">{previewData.validCount}</div>
+                    <div className="text-xs text-nt-text-muted">valid entries</div>
+                  </div>
+                  {previewData.invalidCount > 0 && (
+                    <div className="flex-1 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                      <div className="text-xl font-bold text-red-400">{previewData.invalidCount}</div>
+                      <div className="text-xs text-nt-text-muted">invalid entries</div>
                     </div>
+                  )}
+                  <div className="flex-1 p-3 bg-nt-bg border border-nt-border rounded-xl">
+                    <div className="text-xl font-bold text-white">{previewData.total}</div>
+                    <div className="text-xs text-nt-text-muted">total</div>
                   </div>
                 </div>
-              )}
 
-              {importStatus === 'error' && (
-                <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-                  <AlertCircle className="w-4 h-4 text-red-400 mt-0.5" />
-                  <div className="text-sm text-red-400">Import failed. Check the file format and try again.</div>
+                {/* Preview table */}
+                {previewData.preview.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold text-nt-text-muted mb-2 uppercase tracking-wide">
+                      Preview (first {previewData.preview.length} entries)
+                    </div>
+                    <div className="overflow-x-auto rounded-xl border border-nt-border">
+                      <table className="w-full text-xs">
+                        <thead className="bg-nt-bg">
+                          <tr>
+                            {importType === 'nutrition' ? (
+                              <>
+                                <th className="text-left px-3 py-2 text-nt-text-muted font-medium">Date</th>
+                                <th className="text-left px-3 py-2 text-nt-text-muted font-medium">Food</th>
+                                <th className="text-left px-3 py-2 text-nt-text-muted font-medium">Type</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">g</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">kcal</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">P</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">C</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">F</th>
+                              </>
+                            ) : (
+                              <>
+                                <th className="text-left px-3 py-2 text-nt-text-muted font-medium">Date</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">Weight</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">Body Fat</th>
+                                <th className="text-right px-3 py-2 text-nt-text-muted font-medium">Muscle</th>
+                                <th className="text-left px-3 py-2 text-nt-text-muted font-medium">Note</th>
+                              </>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewData.preview.map((row: any, i: number) => (
+                            <tr key={i} className="border-t border-nt-border/50 hover:bg-nt-bg/50 transition-colors">
+                              {importType === 'nutrition' ? (
+                                <>
+                                  <td className="px-3 py-2 text-nt-text-secondary">{row.date}</td>
+                                  <td className="px-3 py-2 text-white font-medium max-w-[120px] truncate">{row.foodName}</td>
+                                  <td className="px-3 py-2">
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-nt-accent/20 text-nt-accent">{row.mealType}</span>
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-nt-text-secondary">{row.grams}</td>
+                                  <td className="px-3 py-2 text-right text-white font-medium">{Math.round(row.calories)}</td>
+                                  <td className="px-3 py-2 text-right text-blue-400">{Math.round(row.protein)}</td>
+                                  <td className="px-3 py-2 text-right text-amber-400">{Math.round(row.carbs)}</td>
+                                  <td className="px-3 py-2 text-right text-red-400">{Math.round(row.fats)}</td>
+                                </>
+                              ) : (
+                                <>
+                                  <td className="px-3 py-2 text-nt-text-secondary">{row.date}</td>
+                                  <td className="px-3 py-2 text-right text-white font-medium">{row.weight} kg</td>
+                                  <td className="px-3 py-2 text-right text-nt-text-secondary">{row.bodyFat ? `${row.bodyFat}%` : '—'}</td>
+                                  <td className="px-3 py-2 text-right text-nt-text-secondary">{row.muscleMass ? `${row.muscleMass} kg` : '—'}</td>
+                                  <td className="px-3 py-2 text-nt-text-secondary truncate max-w-[100px]">{row.note || '—'}</td>
+                                </>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Validation errors */}
+                {previewData.errors.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold text-red-400 mb-2 uppercase tracking-wide flex items-center gap-1.5">
+                      <AlertCircle className="w-3 h-3" />
+                      Validation Errors ({previewData.errors.length})
+                    </div>
+                    <div className="overflow-x-auto rounded-xl border border-red-500/20 max-h-40 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-red-500/10 sticky top-0">
+                          <tr>
+                            <th className="text-left px-3 py-2 text-red-400 font-medium">Row</th>
+                            <th className="text-left px-3 py-2 text-red-400 font-medium">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewData.errors.map((err: any, i: number) => (
+                            <tr key={i} className="border-t border-red-500/10">
+                              <td className="px-3 py-1.5 text-red-400 font-medium">{err.row}</td>
+                              <td className="px-3 py-1.5 text-red-300">{err.reason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-3 pt-1">
+                  <button onClick={resetImport}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-nt-border text-nt-text-secondary hover:text-white hover:border-nt-accent/50 transition-all">
+                    Cancel
+                  </button>
+                  <button onClick={confirmImport} disabled={previewData.validCount === 0}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium bg-green-500 hover:bg-green-400 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    <Upload className="w-4 h-4" />
+                    Import {previewData.validCount} {importType === 'nutrition' ? 'Meals' : 'Entries'}
+                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {importStep === 'importing' && (
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-green-400" />
+                <div className="text-sm text-nt-text-secondary">Importing data...</div>
+              </div>
+            )}
+
+            {importStep === 'done' && importResult && (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
+                  <CheckCircle2 className="w-5 h-5 text-green-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-green-400 font-semibold">Import complete</div>
+                    <div className="text-nt-text-secondary text-sm mt-1">
+                      {importResult.imported} imported · {importResult.skipped} skipped · {importResult.total} total
+                    </div>
+                    {importResult.errors && importResult.errors.length > 0 && (
+                      <div className="text-amber-400 text-xs mt-1">{importResult.errors.length} rows had errors</div>
+                    )}
+                  </div>
+                </div>
+                <button onClick={resetImport}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium border border-nt-border text-nt-text-secondary hover:text-white hover:border-nt-accent/50 transition-all">
+                  Import Another File
+                </button>
+              </div>
+            )}
           </div>
         </motion.div>
       )}

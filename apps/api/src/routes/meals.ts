@@ -165,18 +165,19 @@ const mealsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     start.setHours(0, 0, 0, 0)
     end.setHours(23, 59, 59, 999)
 
-    // Aggregate in the database — avoids loading every row into Node memory
+    // Aggregate in the database — avoids loading every row into Node memory.
+    // Prisma preserves camelCase column names, so raw SQL must quote them.
     type SummaryRow = { date: Date; calories: number; protein: number; carbs: number; fats: number; count: bigint }
     const rows = await fastify.prisma.$queryRaw<SummaryRow[]>`
       SELECT
-        date_trunc('day', date AT TIME ZONE 'UTC') AS date,
-        SUM(calories)::float  AS calories,
-        SUM(protein)::float   AS protein,
-        SUM(carbs)::float     AS carbs,
-        SUM(fats)::float      AS fats,
-        COUNT(*)              AS count
+        date_trunc('day', date AT TIME ZONE 'UTC')  AS date,
+        SUM(calories)::float                        AS calories,
+        SUM(protein)::float                         AS protein,
+        SUM(carbs)::float                           AS carbs,
+        SUM(fats)::float                            AS fats,
+        COUNT(*)                                    AS count
       FROM meal_entries
-      WHERE user_id = ${userId}
+      WHERE "userId" = ${userId}
         AND date >= ${start}
         AND date <= ${end}
       GROUP BY date_trunc('day', date AT TIME ZONE 'UTC')

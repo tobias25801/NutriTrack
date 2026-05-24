@@ -13,6 +13,10 @@ import waterRoutes from './routes/water'
 import aiRoutes from './routes/ai'
 import achievementsRoutes from './routes/achievements'
 import socialRoutes from './routes/social'
+import stepsRoutes from './routes/steps'
+import fastingRoutes from './routes/fasting'
+import mealPlansRoutes from './routes/mealPlans'
+import exportRoutes from './routes/export'
 
 const prisma = new PrismaClient({
   log: ['error'],
@@ -85,6 +89,10 @@ export const app: FastifyPluginAsync = fp(async (fastify: FastifyInstance) => {
   await fastify.register(aiRoutes, { prefix: '/api/ai' })
   await fastify.register(achievementsRoutes, { prefix: '/api/achievements' })
   await fastify.register(socialRoutes, { prefix: '/api/social' })
+  await fastify.register(stepsRoutes, { prefix: '/api/steps' })
+  await fastify.register(fastingRoutes, { prefix: '/api/fasting' })
+  await fastify.register(mealPlansRoutes, { prefix: '/api/meal-plans' })
+  await fastify.register(exportRoutes, { prefix: '/api/export' })
 
   // 404 handler
   fastify.setNotFoundHandler((request, reply) => {

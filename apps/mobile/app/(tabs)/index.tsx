@@ -1,5 +1,5 @@
-import React from 'react'
-import { ScrollView, View, Text, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native'
+import React, { useEffect, useState } from 'react'
+import { ScrollView, View, Text, StyleSheet, TouchableOpacity, RefreshControl, TextInput, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
@@ -43,9 +43,18 @@ function CalorieRing({ consumed, goal }: { consumed: number; goal: number }) {
   )
 }
 
+function formatFastDuration(ms: number) {
+  const h = Math.floor(ms / 3600000)
+  const m = Math.floor((ms % 3600000) / 60000)
+  return `${h}h ${m}m`
+}
+
 export default function DashboardScreen() {
   const { user } = useAuthStore()
   const queryClient = useQueryClient()
+  const [stepInput, setStepInput] = useState('')
+  const [showStepInput, setShowStepInput] = useState(false)
+  const [fastTick, setFastTick] = useState(0)
 
   const { data: todayData, isLoading, refetch } = useQuery({
     queryKey: ['meals', 'today'],
@@ -57,15 +66,60 @@ export default function DashboardScreen() {
     queryFn: () => api.get('/water/today').then((r) => r.data),
   })
 
+  const { data: stepsData } = useQuery({
+    queryKey: ['steps', 'today'],
+    queryFn: () => api.get('/steps/today').then((r) => r.data),
+  })
+
+  const { data: fastingData } = useQuery({
+    queryKey: ['fasting', 'active'],
+    queryFn: () => api.get('/fasting/active').then((r) => r.data),
+    refetchInterval: 60000,
+  })
+
+  useEffect(() => {
+    if (!fastingData?.active) return
+    const id = setInterval(() => setFastTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [fastingData?.active])
+
   const addWater = useMutation({
     mutationFn: (amount: number) => api.post('/water', { amount }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['water', 'today'] }),
+  })
+
+  const logSteps = useMutation({
+    mutationFn: (steps: number) => api.post('/steps', { steps }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['steps'] })
+      setShowStepInput(false)
+      setStepInput('')
+    },
+  })
+
+  const startFast = useMutation({
+    mutationFn: (hours: number) => api.post('/fasting/start', { targetHours: hours }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fasting'] }),
+  })
+
+  const stopFast = useMutation({
+    mutationFn: (id: string) => api.put(`/fasting/${id}/stop`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['fasting'] })
+      Alert.alert('Fast ended!', 'Great job staying committed.')
+    },
   })
 
   const totals = todayData?.totals || { calories: 0, protein: 0, carbs: 0, fats: 0 }
   const waterTotal = waterData?.total || 0
   const waterGoal = user?.dailyWater || 2000
   const dailyGoal = user?.dailyCalories || 2000
+  const steps = stepsData?.steps || 0
+  const stepGoal = stepsData?.goal || 10000
+  const stepPct = Math.min(100, (steps / stepGoal) * 100)
+  const activeFast = fastingData?.active
+  const fastElapsed = activeFast ? Date.now() - new Date(activeFast.startTime).getTime() : 0
+  const fastPct = activeFast ? Math.min(100, (fastElapsed / (activeFast.targetHours * 3600000)) * 100) : 0
 
   const macros = [
     { label: 'Protein', value: totals.protein, goal: user?.dailyProtein || 150, color: Colors.protein, unit: 'g' },
@@ -144,6 +198,86 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+
+        {/* Steps */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="walk-outline" size={18} color="#22c55e" />
+            <Text style={styles.cardTitle}>Steps</Text>
+            <Text style={styles.cardSubtitle}>{steps.toLocaleString()}/{stepGoal.toLocaleString()}</Text>
+          </View>
+          <View style={[styles.waterProgress, { marginBottom: Spacing.sm }]}>
+            <View style={[styles.waterFill, { width: `${stepPct}%`, backgroundColor: '#22c55e' }]} />
+          </View>
+          {showStepInput ? (
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TextInput
+                value={stepInput}
+                onChangeText={setStepInput}
+                keyboardType="number-pad"
+                placeholder="e.g. 8000"
+                placeholderTextColor={Colors.textMuted}
+                style={{ flex: 1, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md, paddingHorizontal: 12, paddingVertical: 6, color: Colors.text, fontSize: 13 }}
+              />
+              <TouchableOpacity
+                onPress={() => { const v = parseInt(stepInput); if (v > 0) logSteps.mutate(v) }}
+                style={{ backgroundColor: Colors.accent, borderRadius: BorderRadius.md, paddingHorizontal: 14, paddingVertical: 6, justifyContent: 'center' }}
+              >
+                <Text style={{ color: Colors.text, fontWeight: '600', fontSize: 13 }}>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowStepInput(false)} style={{ justifyContent: 'center', paddingHorizontal: 8 }}>
+                <Text style={{ color: Colors.textMuted }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={() => setShowStepInput(true)}>
+              <Text style={{ fontSize: 12, color: Colors.accent }}>+ Log steps</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Fasting */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="timer-outline" size={18} color="#f97316" />
+            <Text style={styles.cardTitle}>{activeFast ? 'Fasting' : 'Intermittent Fasting'}</Text>
+            {activeFast && <Text style={styles.cardSubtitle}>{activeFast.targetHours}h goal</Text>}
+          </View>
+          {activeFast ? (
+            <>
+              <Text style={{ fontSize: 26, fontWeight: '800', color: fastPct >= 100 ? '#22c55e' : Colors.text, fontVariant: ['tabular-nums'] }}>
+                {formatFastDuration(fastElapsed)}
+              </Text>
+              <View style={[styles.waterProgress, { marginTop: 8, marginBottom: 8 }]}>
+                <View style={[styles.waterFill, { width: `${fastPct}%`, backgroundColor: fastPct >= 100 ? '#22c55e' : '#f97316' }]} />
+              </View>
+              <TouchableOpacity
+                onPress={() => Alert.alert('End Fast?', 'Are you sure you want to end your fast?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'End Fast', style: 'destructive', onPress: () => stopFast.mutate(activeFast.id) },
+                ])}
+                style={{ backgroundColor: 'rgba(239,68,68,0.15)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', borderRadius: BorderRadius.md, paddingVertical: 7, alignItems: 'center' }}
+              >
+                <Text style={{ color: '#ef4444', fontSize: 13, fontWeight: '600' }}>End Fast</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={{ fontSize: 12, color: Colors.textSecondary, marginBottom: Spacing.sm }}>Start a fasting window</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {[16, 18, 20].map((h) => (
+                  <TouchableOpacity
+                    key={h}
+                    onPress={() => startFast.mutate(h)}
+                    style={{ flex: 1, paddingVertical: 8, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md, alignItems: 'center' }}
+                  >
+                    <Text style={{ fontSize: 13, color: Colors.text, fontWeight: '600' }}>{h}:{24 - h}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
         </View>
 
         {/* Today's Meals Preview */}

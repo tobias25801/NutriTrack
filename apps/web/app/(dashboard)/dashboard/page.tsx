@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { Droplets, Footprints, Plus, Sparkles, Target, TrendingUp } from 'lucide-react'
+import { Droplets, Plus, Sparkles, Target, TrendingUp } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/lib/api'
 import { CalorieRing } from '@/components/dashboard/CalorieRing'
@@ -11,6 +11,8 @@ import { MacroCard } from '@/components/dashboard/MacroCard'
 import { WaterTracker } from '@/components/dashboard/WaterTracker'
 import { WeeklyChart } from '@/components/dashboard/WeeklyChart'
 import { AITipCard } from '@/components/dashboard/AITipCard'
+import { StepWidget } from '@/components/dashboard/StepWidget'
+import { FastingWidget } from '@/components/dashboard/FastingWidget'
 import { formatCalories, getPercentage } from '@/lib/utils'
 import Link from 'next/link'
 
@@ -81,6 +83,16 @@ export default function DashboardPage() {
               <MacroCard {...macro} />
             </motion.div>
           ))}
+        </motion.div>
+      </div>
+
+      {/* Step + Fasting row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <motion.div {...fadeUp} transition={{ delay: 0.15 }}>
+          <StepWidget />
+        </motion.div>
+        <motion.div {...fadeUp} transition={{ delay: 0.2 }}>
+          <FastingWidget />
         </motion.div>
       </div>
 

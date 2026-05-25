@@ -27,4 +27,4 @@ RUN addgroup --system --gid 1001 nodejs && \
 USER fastify
 
 EXPOSE 3001
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/server.js"]
+CMD ["node", "dist/server.js"]

@@ -1,30 +1,30 @@
 FROM node:20-alpine AS base
-RUN npm install -g pnpm
 
 FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/
+COPY packages/shared/package.json ./packages/shared/
+RUN npm ci
 
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN pnpm prisma generate
-RUN pnpm build
+RUN cd apps/api && npx prisma generate && npx tsc
 
 FROM base AS runner
 WORKDIR /app
-ENV NODE_ENV production
+ENV NODE_ENV=production
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/apps/api/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/prisma ./prisma
-COPY package.json ./
+COPY --from=builder /app/apps/api/prisma ./prisma
+COPY apps/api/package.json ./
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 fastify
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 fastify
 USER fastify
 
 EXPOSE 3001
-CMD ["node", "dist/server.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/server.js"]
